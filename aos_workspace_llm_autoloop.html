@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AOS Workspace (LLM Auto-Iteration Loop)</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; display: flex; gap: 30px; }
+  #main { flex: 3; }
+  #timeline { flex: 1; border-left: 2px solid #ccc; padding-left: 20px; }
+  h1 { margin-bottom: 10px; }
+  h2 { margin-top: 25px; }
+  textarea {
+    width: 100%;
+    height: 140px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+  .meta input {
+    padding: 6px;
+    font-size: 14px;
+    width: 320px;
+  }
+  button {
+    padding: 10px 20px;
+    margin-top: 20px;
+    font-size: 16px;
+    margin-right: 10px;
+  }
+  #output {
+    white-space: pre;
+    background: #f5f5f5;
+    padding: 10px;
+    margin-top: 20px;
+    border: 1px solid #ccc;
+  }
+  #injectBox {
+    width: 100%;
+    height: 200px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+  .timeline-item {
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .timeline-item.active {
+    background: #e0f0ff;
+    border-color: #3399ff;
+  }
+</style>
+</head>
+<body>
+
+<div id="main">
+  <h1>AOS Workspace (LLM Auto-Iteration Loop)</h1>
+
+  <div class="meta">
+    <label>Domain:
+      <input id="domain" placeholder="financial / law_enforcement / system_logs / social">
+    </label>
+  </div>
+
+  <div class="meta">
+    <label>LLM Endpoint URL:
+      <input id="llmUrl" placeholder="https://example.com/llm-endpoint">
+    </label>
+  </div>
+
+  <div class="meta">
+    <label>Auto-Loop Iterations:
+      <input id="loopCount" type="number" value="3" min="1" style="width:80px;">
+    </label>
+    <button onclick="runLLMLoop()">Run LLM Auto-Loop</button>
+  </div>
+
+  <h2>Receiver Mode: Inject JSON to Populate Fields</h2>
+  <textarea id="injectBox" placeholder='Paste JSON here to populate fields...'></textarea>
+  <button onclick="loadFromJSON()">Load From JSON</button>
+
+  <h2>1. Sense</h2>
+  <textarea id="sense"></textarea>
+
+  <h2>2. Triage</h2>
+  <textarea id="triage"></textarea>
+
+  <h2>3. Explain</h2>
+  <textarea id="explain"></textarea>
+
+  <h2>4. Adapt</h2>
+  <textarea id="adapt"></textarea>
+
+  <button onclick="generateJSON()">Generate JSON Artifact</button>
+  <button onclick="saveIteration()">Save + Next Iteration</button>
+  <button onclick="prevIteration()">Previous</button>
+  <button onclick="nextIteration()">Next</button>
+
+  <h2>Iterations (JSON)</h2>
+  <div id="output"></div>
+</div>
+
+<div id="timeline">
+  <h2>Timeline</h2>
+  <div id="timelineList"></div>
+</div>
+
+<script>
+  let iterations = [];
+  let currentIndex = -1;
+  let lastGeneratedJSON = null;
+
+  function loadFromJSON() {
+    try {
+      const data = JSON.parse(document.getElementById('injectBox').value);
+      for (const key in data) {
+        if (document.getElementById(key)) {
+          document.getElementById(key).value = data[key];
+        }
+      }
+      alert("Fields populated from JSON input.");
+    } catch (e) {
+      alert("Invalid JSON.");
+    }
+  }
+
+  function buildRecord() {
+    return {
+      iteration: iterations.length + 1,
+      timestamp: new Date().toISOString(),
+      domain: document.getElementById('domain').value,
+      sense: document.getElementById('sense').value,
+      triage: document.getElementById('triage').value,
+      explain: document.getElementById('explain').value,
+      adapt: document.getElementById('adapt').value
+    };
+  }
+
+  function clearFields() {
+    document.getElementById('sense').value = "";
+    document.getElementById('triage').value = "";
+    document.getElementById('explain').value = "";
+    document.getElementById('adapt').value = "";
+  }
+
+  function generateJSON() {
+    lastGeneratedJSON = buildRecord();
+    document.getElementById('output').textContent =
+      JSON.stringify(lastGeneratedJSON, null, 2);
+  }
+
+  function saveIteration() {
+    const record = buildRecord();
+    iterations.push(record);
+    currentIndex = iterations.length - 1;
+    clearFields();
+    renderTimeline();
+    renderOutput();
+  }
+
+  function renderTimeline() {
+    const list = document.getElementById('timelineList');
+    list.innerHTML = "";
+    iterations.forEach((it, idx) => {
+      const div = document.createElement('div');
+      div.className = "timeline-item" + (idx === currentIndex ? " active" : "");
+      div.textContent = "Iteration " + it.iteration + " — " + it.timestamp;
+      div.onclick = () => loadIteration(idx);
+      list.appendChild(div);
+    });
+  }
+
+  function loadIteration(index) {
+    if (index < 0 || index >= iterations.length) return;
+    currentIndex = index;
+    const it = iterations[index];
+    document.getElementById('domain').value = it.domain;
+    document.getElementById('sense').value = it.sense;
+    document.getElementById('triage').value = it.triage;
+    document.getElementById('explain').value = it.explain;
+    document.getElementById('adapt').value = it.adapt;
+    renderTimeline();
+    renderOutput();
+  }
+
+  function prevIteration() {
+    if (currentIndex > 0) loadIteration(currentIndex - 1);
+  }
+
+  function nextIteration() {
+    if (currentIndex < iterations.length - 1) loadIteration(currentIndex + 1);
+  }
+
+  function renderOutput() {
+    document.getElementById('output').textContent =
+      JSON.stringify(iterations, null, 2);
+  }
+
+  async function runLLMLoop() {
+    const url = document.getElementById('llmUrl').value.trim();
+    const count = parseInt(document.getElementById('loopCount').value, 10) || 1;
+    if (!url) {
+      alert("Please enter an LLM endpoint URL.");
+      return;
+    }
+
+    let currentPayload = buildRecord();
+
+    for (let i = 0; i < count; i++) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(currentPayload)
+        });
+        const data = await response.json();
+
+        // Populate fields with LLM response
+        for (const key in data) {
+          if (document.getElementById(key)) {
+            document.getElementById(key).value = data[key];
+          }
+        }
+
+        // Create iteration from LLM output
+        const record = buildRecord();
+        iterations.push(record);
+        currentIndex = iterations.length - 1;
+        renderTimeline();
+        renderOutput();
+
+        // Prepare next payload as the latest record
+        currentPayload = record;
+        clearFields();
+      } catch (e) {
+        alert("LLM loop failed at step " + (i + 1) + ": " + e);
+        break;
+      }
+    }
+  }
+</script>
+
+</body>
+</html>
