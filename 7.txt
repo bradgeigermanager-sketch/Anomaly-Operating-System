@@ -1,0 +1,381 @@
+Baymont, here is the **Developer’s Guide** and the **LLM Implementation Guide** for your AOS two‑way, multi‑agent, JSON‑driven reasoning system.  
+This is written as if you were handing it to:
+
+- A **software engineer** building integrations  
+- An **LLM** participating in the loop  
+- A **group of LLMs** collaborating or posting updates to a shared JSON endpoint  
+- A **workflow orchestrator** coordinating everything  
+
+It includes:
+
+- Verbose documentation  
+- Bullet‑point summaries  
+- Process diagrams (textual)  
+- Pseudocode  
+- Machine‑readable specifications  
+- Group‑LLM coordination rules  
+
+This is the complete “how to build and how to behave” manual.
+
+---
+
+# **📘 1. DEVELOPER’S GUIDE (Verbose Edition)**  
+## **Purpose**
+The AOS workspace is a **bidirectional reasoning hub**.  
+Developers can integrate:
+
+- **Single LLM loops** (LLM ↔ Workspace)  
+- **Multi‑LLM group loops** (LLM₁ → Workspace → LLM₂ → Workspace → …)  
+- **External systems** (sensors, anomaly detectors, agents)  
+- **Human analysts**  
+
+Everything is mediated through **JSON iteration records**.
+
+---
+
+## **1.1 Core Concepts**
+
+### **Iteration**
+A single reasoning step containing:
+
+- domain  
+- sense  
+- triage  
+- explain  
+- adapt  
+- timestamp  
+- iteration number  
+
+### **Timeline**
+A chronological list of iterations.  
+Each new iteration is appended automatically.
+
+### **Receiver Modes**
+The workspace can ingest:
+
+- URL parameters  
+- URL‑encoded JSON  
+- WebSocket messages  
+- Manual JSON injection  
+- LLM POST responses  
+
+### **Auto‑Advance**
+Whenever new JSON arrives, the workspace:
+
+1. Populates fields  
+2. Creates a new iteration  
+3. Clears fields  
+4. Prepares for the next cycle  
+
+---
+
+## **1.2 Developer Integration Patterns**
+
+### **Pattern A — Single LLM Loop**
+```
+Workspace → LLM → Workspace → LLM → Workspace
+```
+
+The workspace sends JSON to the LLM endpoint.  
+The LLM returns updated JSON.  
+The workspace auto‑creates a new iteration.
+
+### **Pattern B — Multi‑LLM Group Loop**
+```
+LLM_A → Workspace → LLM_B → Workspace → LLM_C → Workspace
+```
+
+Each LLM:
+
+- Receives the last iteration  
+- Produces a new iteration  
+- Posts it back  
+
+### **Pattern C — Broadcast Group Loop**
+```
+Workspace → {LLM_A, LLM_B, LLM_C} → Workspace
+```
+
+Multiple LLMs respond in parallel.  
+Each response becomes its own iteration.
+
+### **Pattern D — External System + LLM Hybrid**
+```
+Sensor → Workspace → LLM → Workspace → Human → Workspace
+```
+
+---
+
+## **1.3 JSON Contract (Developer‑Facing)**
+
+### **Request sent to LLM**
+```json
+{
+  "iteration": 5,
+  "timestamp": "2026-06-16T21:22:00Z",
+  "domain": "system_logs",
+  "sense": "Observed spike in 5xx",
+  "triage": "High severity",
+  "explain": "Likely DB latency",
+  "adapt": "Add circuit breaker"
+}
+```
+
+### **Response expected from LLM**
+```json
+{
+  "domain": "system_logs",
+  "sense": "New observations...",
+  "triage": "Updated severity...",
+  "explain": "Refined hypotheses...",
+  "adapt": "Next steps..."
+}
+```
+
+---
+
+## **1.4 Developer Responsibilities**
+
+- Ensure LLM endpoints accept and return **pure JSON**  
+- Ensure WebSocket messages are **JSON objects**  
+- Ensure URL‑encoded JSON is properly escaped  
+- Ensure no HTML/markdown is returned by LLMs  
+- Ensure group LLMs do not overwrite each other’s iterations  
+
+---
+
+# **📘 2. DEVELOPER QUICK SUMMARY (Bullet Points)**
+
+- Workspace accepts JSON from URL, WebSocket, or POST  
+- Workspace auto‑creates iterations on ingestion  
+- LLM endpoints must return **only JSON**  
+- Group LLMs must each return **one JSON iteration**  
+- Workspace stores all iterations in a timeline  
+- Developers can orchestrate multi‑agent loops  
+
+---
+
+# **📘 3. DEVELOPER PROCESS STEPS**
+
+1. Build an LLM endpoint that accepts JSON  
+2. Ensure it returns JSON with the required fields  
+3. Configure workspace with the endpoint URL  
+4. Use **Send to LLM** or **Auto‑Loop**  
+5. Workspace ingests LLM output and creates new iteration  
+6. Repeat  
+
+---
+
+# **📘 4. LLM IMPLEMENTATION GUIDE (Verbose Edition)**  
+This is the guide you give to the LLM itself.
+
+---
+
+## **4.1 LLM Role**
+You are a **reasoning agent** participating in an iterative anomaly‑analysis loop.
+
+Your job is to:
+
+- Read the incoming iteration  
+- Advance the reasoning  
+- Produce a new iteration  
+- Output **only JSON**  
+
+---
+
+## **4.2 LLM Input**
+You will receive JSON with:
+
+- domain  
+- sense  
+- triage  
+- explain  
+- adapt  
+
+This represents the **current state** of the analysis.
+
+---
+
+## **4.3 LLM Output Requirements**
+
+### **You MUST output JSON only:**
+```json
+{
+  "domain": "...",
+  "sense": "...",
+  "triage": "...",
+  "explain": "...",
+  "adapt": "..."
+}
+```
+
+### **You MUST NOT:**
+- Output markdown  
+- Output commentary  
+- Output explanations  
+- Repeat the previous iteration verbatim  
+- Add fields not in the schema  
+
+---
+
+## **4.4 LLM Behavior Rules**
+
+### **Rule 1 — Advance the reasoning**
+Each iteration must:
+
+- Add new observations  
+- Refine triage  
+- Improve explanations  
+- Suggest actionable adaptations  
+
+### **Rule 2 — Maintain continuity**
+Your output must logically follow from the previous iteration.
+
+### **Rule 3 — Avoid loops**
+Do not repeat the same reasoning step.
+
+### **Rule 4 — Stay within the domain**
+If domain = “system_logs”, do not switch to “financial”.
+
+### **Rule 5 — Be concise but meaningful**
+Each field should contain 1–4 sentences.
+
+---
+
+# **📘 5. LLM QUICK SUMMARY (Bullet Points)**
+
+- Read the JSON  
+- Improve the reasoning  
+- Output new JSON  
+- No markdown  
+- No commentary  
+- No repetition  
+- No new fields  
+
+---
+
+# **📘 6. LLM PROCESS STEPS**
+
+1. Read the incoming JSON  
+2. Understand the anomaly  
+3. Improve the sense/triage/explain/adapt fields  
+4. Output new JSON  
+5. Stop  
+
+---
+
+# **📘 7. MULTI‑LLM GROUP IMPLEMENTATION GUIDE**
+
+## **7.1 Group Loop Pattern**
+Each LLM receives the **latest iteration** and produces a **new iteration**.
+
+### Example:
+```
+LLM_A → Workspace → LLM_B → Workspace → LLM_C → Workspace
+```
+
+## **7.2 Group Behavior Rules**
+
+### **Rule A — Each LLM must add unique value**
+- LLM_A may focus on technical causes  
+- LLM_B may focus on social dynamics  
+- LLM_C may focus on mitigation strategies  
+
+### **Rule B — No overwriting**
+Each LLM produces its own iteration.
+
+### **Rule C — No cross‑talk unless orchestrated**
+LLMs do not communicate directly unless the developer orchestrates it.
+
+### **Rule D — Deterministic ordering**
+The orchestrator determines:
+
+- LLM order  
+- Number of cycles  
+- Termination conditions  
+
+---
+
+# **📘 8. PSEUDOCODE FOR MULTI‑LLM GROUP LOOP**
+
+```pseudo
+payload = initial_iteration
+
+for llm in group:
+    response = POST(llm.endpoint, payload)
+    new_iteration = parse(response)
+    workspace.ingest(new_iteration)
+    payload = new_iteration
+```
+
+---
+
+# **📘 9. MACHINE‑READABLE PROTOCOLS**
+
+## **9.1 LLM Request Schema**
+```json
+{
+  "type": "object",
+  "properties": {
+    "iteration": { "type": "integer" },
+    "timestamp": { "type": "string" },
+    "domain": { "type": "string" },
+    "sense": { "type": "string" },
+    "triage": { "type": "string" },
+    "explain": { "type": "string" },
+    "adapt": { "type": "string" }
+  },
+  "required": ["domain", "sense", "triage", "explain", "adapt"]
+}
+```
+
+## **9.2 LLM Response Schema**
+```json
+{
+  "type": "object",
+  "properties": {
+    "domain": { "type": "string" },
+    "sense": { "type": "string" },
+    "triage": { "type": "string" },
+    "explain": { "type": "string" },
+    "adapt": { "type": "string" }
+  },
+  "required": ["domain", "sense", "triage", "explain", "adapt"]
+}
+```
+
+---
+
+# **📘 10. OPTIONAL: GROUP‑LLM COORDINATION MODES**
+
+## **Mode 1 — Sequential Chain**
+LLM_A → LLM_B → LLM_C
+
+## **Mode 2 — Parallel Broadcast**
+LLM_A  
+LLM_B  
+LLM_C  
+(all respond to the same iteration)
+
+## **Mode 3 — Round‑Robin Loop**
+A → B → C → A → B → C
+
+## **Mode 4 — Domain‑Specialized Loop**
+- LLM_A handles “sense”  
+- LLM_B handles “triage”  
+- LLM_C handles “explain”  
+- LLM_D handles “adapt”  
+
+---
+
+# **If you want…**
+
+I can now generate:
+
+- **A full API reference**  
+- **A multi‑agent orchestration engine spec**  
+- **A governance and audit guide**  
+- **A training curriculum for LLMs**  
+- **A human analyst certification guide**  
+
+Just tell me which one you want next.
