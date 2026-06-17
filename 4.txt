@@ -1,0 +1,448 @@
+Baymont, this is where your AOS workspace stops being a **viewer** and becomes a **collaborative reasoning loop** with an LLM — a true two‑way integration.
+
+You’re essentially asking for:
+
+> **AOS Workspace ↔ LLM**  
+> where the workspace can *send* an iteration to an LLM endpoint  
+> and the LLM can *respond* with a new iteration  
+> which the workspace then **auto‑ingests**, **auto‑advances**, and **adds to the timeline**.
+
+This turns the page into a **live co‑analysis environment**.
+
+Below is the **full upgraded HTML** with:
+
+- A “Send to LLM” button  
+- A field for the LLM endpoint URL  
+- A POST request that sends the current iteration JSON  
+- Automatic ingestion of the LLM’s JSON response  
+- Automatic creation of a new iteration from the LLM’s output  
+- Timeline update  
+- Field clearing for the next cycle  
+- Full compatibility with URL ingestion + WebSocket ingestion  
+
+Save as:
+
+`aos_workspace_receiver_url_ws_llm.html`
+
+---
+
+# **AOS Workspace with Two‑Way LLM Integration (Full Version)**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AOS Workspace (Two-Way LLM Integration)</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; display: flex; gap: 30px; }
+  #main { flex: 3; }
+  #timeline { flex: 1; border-left: 2px solid #ccc; padding-left: 20px; }
+
+  h1 { margin-bottom: 10px; }
+  h2 { margin-top: 25px; }
+  textarea {
+    width: 100%;
+    height: 140px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+
+  .meta input {
+    padding: 6px;
+    font-size: 14px;
+    width: 320px;
+  }
+
+  button {
+    padding: 10px 20px;
+    margin-top: 20px;
+    font-size: 16px;
+    margin-right: 10px;
+  }
+
+  #output {
+    white-space: pre;
+    background: #f5f5f5;
+    padding: 10px;
+    margin-top: 20px;
+    border: 1px solid #ccc;
+  }
+
+  #injectBox {
+    width: 100%;
+    height: 200px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+
+  .timeline-item {
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .timeline-item.active {
+    background: #e0f0ff;
+    border-color: #3399ff;
+  }
+
+  #wsStatus {
+    font-size: 13px;
+    margin-left: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="main">
+  <h1>AOS Workspace (Two‑Way LLM Integration)</h1>
+
+  <div class="meta">
+    <label>Domain:
+      <input id="domain" placeholder="financial / law_enforcement / system_logs / social">
+    </label>
+  </div>
+
+  <div class="meta">
+    <label>POST Address:
+      <input id="postAddress" placeholder="/aos/iteration or any endpoint">
+    </label>
+  </div>
+
+  <div class="meta">
+    <label>LLM Endpoint URL:
+      <input id="llmUrl" placeholder="https://example.com/llm-endpoint">
+    </label>
+    <button onclick="sendToLLM()">Send to LLM</button>
+  </div>
+
+  <div class="meta">
+    <label>WebSocket URL:
+      <input id="wsUrl" placeholder="wss://example.com/aos-stream">
+    </label>
+    <button onclick="connectWebSocket()">Connect</button>
+    <span id="wsStatus">(WebSocket: disconnected)</span>
+  </div>
+
+  <h2>Receiver Mode: Inject JSON to Populate Fields</h2>
+  <textarea id="injectBox" placeholder='Paste JSON here to populate fields...'></textarea>
+  <button onclick="loadFromJSON()">Load From JSON</button>
+
+  <h2>1. Sense</h2>
+  <textarea id="sense"></textarea>
+
+  <h2>2. Triage</h2>
+  <textarea id="triage"></textarea>
+
+  <h2>3. Explain</h2>
+  <textarea id="explain"></textarea>
+
+  <h2>4. Adapt</h2>
+  <textarea id="adapt"></textarea>
+
+  <button onclick="generateJSON()">Generate JSON Artifact</button>
+  <button onclick="simulatePOST()">Submit (Simulated POST)</button>
+  <button onclick="saveIteration()">Save + Next Iteration</button>
+  <button onclick="prevIteration()">Previous</button>
+  <button onclick="nextIteration()">Next</button>
+
+  <h2>Iterations (JSON)</h2>
+  <div id="output"></div>
+</div>
+
+<div id="timeline">
+  <h2>Timeline</h2>
+  <div id="timelineList"></div>
+</div>
+
+<script>
+  let iterations = [];
+  let currentIndex = -1;
+  let lastGeneratedJSON = null;
+  let ws = null;
+
+  // -----------------------------
+  // URL PARAMETER INGESTION + AUTO-ADVANCE
+  // -----------------------------
+  function ingestURLParamsAndAutoAdvance() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.toString().length === 0) return;
+
+    let foundAny = false;
+
+    const mapping = {
+      domain: 'domain',
+      postAddress: 'postAddress',
+      sense: 'sense',
+      triage: 'triage',
+      explain: 'explain',
+      adapt: 'adapt'
+    };
+
+    for (const key in mapping) {
+      if (params.has(key)) {
+        document.getElementById(mapping[key]).value = params.get(key);
+        foundAny = true;
+      }
+    }
+
+    if (params.has('payload')) {
+      try {
+        const data = JSON.parse(params.get('payload'));
+        for (const key in data) {
+          if (document.getElementById(key)) {
+            document.getElementById(key).value = data[key];
+          }
+        }
+        foundAny = true;
+      } catch (e) {
+        console.warn("Invalid JSON payload:", e);
+      }
+    }
+
+    if (foundAny) autoCreateIteration();
+  }
+
+  function autoCreateIteration() {
+    const record = buildRecord();
+    iterations.push(record);
+    currentIndex = iterations.length - 1;
+    clearFields();
+    renderTimeline();
+    renderOutput();
+  }
+
+  // -----------------------------
+  // JSON INJECTION
+  // -----------------------------
+  function loadFromJSON() {
+    try {
+      const data = JSON.parse(document.getElementById('injectBox').value);
+      for (const key in data) {
+        if (document.getElementById(key)) {
+          document.getElementById(key).value = data[key];
+        }
+      }
+      alert("Fields populated from JSON input.");
+    } catch (e) {
+      alert("Invalid JSON.");
+    }
+  }
+
+  // -----------------------------
+  // RECORD BUILDING
+  // -----------------------------
+  function buildRecord() {
+    return {
+      iteration: iterations.length + 1,
+      timestamp: new Date().toISOString(),
+      postAddress: document.getElementById('postAddress').value,
+      domain: document.getElementById('domain').value,
+      sense: document.getElementById('sense').value,
+      triage: document.getElementById('triage').value,
+      explain: document.getElementById('explain').value,
+      adapt: document.getElementById('adapt').value
+    };
+  }
+
+  function clearFields() {
+    document.getElementById('sense').value = "";
+    document.getElementById('triage').value = "";
+    document.getElementById('explain').value = "";
+    document.getElementById('adapt').value = "";
+  }
+
+  // -----------------------------
+  // TWO-WAY LLM INTEGRATION
+  // -----------------------------
+  async function sendToLLM() {
+    const url = document.getElementById('llmUrl').value.trim();
+    if (!url) {
+      alert("Please enter an LLM endpoint URL.");
+      return;
+    }
+
+    const payload = buildRecord();
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+
+      // Populate fields with LLM response
+      for (const key in data) {
+        if (document.getElementById(key)) {
+          document.getElementById(key).value = data[key];
+        }
+      }
+
+      // Auto-create new iteration from LLM output
+      autoCreateIteration();
+
+    } catch (e) {
+      alert("LLM request failed: " + e);
+    }
+  }
+
+  // -----------------------------
+  // JSON GENERATION + POST SIM
+  // -----------------------------
+  function generateJSON() {
+    lastGeneratedJSON = buildRecord();
+    document.getElementById('output').textContent =
+      JSON.stringify(lastGeneratedJSON, null, 2);
+  }
+
+  function simulatePOST() {
+    if (!lastGeneratedJSON) generateJSON();
+    alert("Simulated POST:\n\n" + JSON.stringify(lastGeneratedJSON, null, 2));
+  }
+
+  // -----------------------------
+  // ITERATION MANAGEMENT
+  // -----------------------------
+  function saveIteration() {
+    const record = buildRecord();
+    iterations.push(record);
+    currentIndex = iterations.length - 1;
+    clearFields();
+    renderTimeline();
+    renderOutput();
+  }
+
+  function renderTimeline() {
+    const list = document.getElementById('timelineList');
+    list.innerHTML = "";
+
+    iterations.forEach((it, idx) => {
+      const div = document.createElement('div');
+      div.className = "timeline-item" + (idx === currentIndex ? " active" : "");
+      div.textContent = "Iteration " + it.iteration + " — " + it.timestamp;
+      div.onclick = () => loadIteration(idx);
+      list.appendChild(div);
+    });
+  }
+
+  function loadIteration(index) {
+    if (index < 0 || index >= iterations.length) return;
+
+    currentIndex = index;
+    const it = iterations[index];
+
+    document.getElementById('domain').value = it.domain;
+    document.getElementById('postAddress').value = it.postAddress;
+    document.getElementById('sense').value = it.sense;
+    document.getElementById('triage').value = it.triage;
+    document.getElementById('explain').value = it.explain;
+    document.getElementById('adapt').value = it.adapt;
+
+    renderTimeline();
+    renderOutput();
+  }
+
+  function prevIteration() {
+    if (currentIndex > 0) loadIteration(currentIndex - 1);
+  }
+
+  function nextIteration() {
+    if (currentIndex < iterations.length - 1) loadIteration(currentIndex + 1);
+  }
+
+  function renderOutput() {
+    document.getElementById('output').textContent =
+      JSON.stringify(iterations, null, 2);
+  }
+
+  // -----------------------------
+  // WEBSOCKET LIVE INGESTION
+  // -----------------------------
+  function connectWebSocket() {
+    const url = document.getElementById('wsUrl').value.trim();
+    if (!url) {
+      alert("Please enter a WebSocket URL.");
+      return;
+    }
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+
+    ws = new WebSocket(url);
+    const statusEl = document.getElementById('wsStatus');
+
+    ws.onopen = () => statusEl.textContent = "(WebSocket: connected)";
+    ws.onclose = () => statusEl.textContent = "(WebSocket: disconnected)";
+    ws.onerror = () => statusEl.textContent = "(WebSocket: error)";
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        for (const key in data) {
+          if (document.getElementById(key)) {
+            document.getElementById(key).value = data[key];
+          }
+        }
+        autoCreateIteration();
+      } catch (e) {
+        console.warn("Invalid JSON from WebSocket:", e);
+      }
+    };
+  }
+
+  // -----------------------------
+  // INITIALIZATION
+  // -----------------------------
+  ingestURLParamsAndAutoAdvance();
+</script>
+
+</body>
+</html>
+```
+
+---
+
+# **What You Now Have**
+
+### ✔ Full two‑way LLM integration  
+The workspace can:
+
+- **Send** the current iteration to an LLM  
+- **Receive** the LLM’s structured JSON response  
+- **Auto‑populate** the fields  
+- **Auto‑create** a new iteration  
+- **Advance the timeline**  
+
+### ✔ Three ingestion modes  
+1. **URL parameters**  
+2. **URL‑encoded JSON**  
+3. **WebSocket live feed**  
+
+### ✔ Three output modes  
+1. JSON artifact  
+2. Simulated POST  
+3. LLM POST  
+
+### ✔ Full iterative notebook  
+Every cycle is stored, navigable, and exportable.
+
+---
+
+If you want, I can now add:
+
+- **LocalStorage persistence**  
+- **Download JSON/CSV**  
+- **Cross‑iteration linking (parent/child)**  
+- **LLM‑driven auto‑iteration loops**  
+- **AOS anomaly schema validation**  
+
+Just tell me where you want to take this next.
