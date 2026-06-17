@@ -1,0 +1,309 @@
+### Multi‑agent orchestration engine — developer specification
+
+---
+
+## 1. Conceptual overview
+
+**Goal:** Coordinate one or more LLM agents (and optionally humans/systems) around the AOS iteration object:
+
+- **Input/Output unit:** AOS iteration JSON  
+- **Core loop:**  
+  - Read latest iteration(s)  
+  - Select agent(s) to act  
+  - Call them with iteration JSON  
+  - Ingest their JSON responses as new iterations  
+  - Repeat until stop condition
+
+The engine is **stateless per step** but operates over a **stateful timeline** (the iterations).
+
+---
+
+## 2. Core entities
+
+- **Iteration:**  
+  - `iteration`, `timestamp`, `domain`, `sense`, `triage`, `explain`, `adapt`
+- **Agent:**  
+  - `id` (string)  
+  - `role` (e.g., “root_cause”, “mitigation”, “social_dynamics”)  
+  - `endpoint` (HTTP URL or WebSocket channel)  
+  - `mode` (`"sequential" | "parallel" | "broadcast"`)  
+  - `constraints` (max steps, domains, etc.)
+- **Orchestration plan:**  
+  - `pattern` (`"sequential_chain" | "parallel_broadcast" | "round_robin" | "specialized_fields"`)  
+  - `agents` (ordered list)  
+  - `max_iterations`  
+  - `stop_conditions`  
+
+---
+
+## 3. Orchestration patterns
+
+### 3.1 Sequential chain
+
+**Flow:**
+
+1. Start from `iteration_0`  
+2. For each agent in order:  
+   - Send latest iteration  
+   - Receive new iteration  
+   - Append to timeline  
+3. Stop when `max_iterations` or stop condition met.
+
+**Use:** Deepening a single line of reasoning.
+
+---
+
+### 3.2 Parallel broadcast
+
+**Flow:**
+
+1. Start from `iteration_0`  
+2. Send same iteration to all agents in parallel  
+3. Each response becomes a **separate** new iteration  
+4. Optionally, pick one as “canonical next” or keep all as branches.
+
+**Use:** Diverse perspectives on same anomaly.
+
+---
+
+### 3.3 Round‑robin
+
+**Flow:**
+
+1. Start from `iteration_0`  
+2. Agent A → new iteration  
+3. Agent B → new iteration  
+4. Agent C → new iteration  
+5. Repeat A → B → C… until stop.
+
+**Use:** Multi‑disciplinary refinement over time.
+
+---
+
+### 3.4 Specialized fields
+
+**Flow:**
+
+- Agent A: focuses on `sense`  
+- Agent B: focuses on `triage`  
+- Agent C: focuses on `explain`  
+- Agent D: focuses on `adapt`  
+
+Each agent receives the full iteration but is instructed to primarily modify its field.
+
+**Use:** Decomposed reasoning by function.
+
+---
+
+## 4. Engine responsibilities
+
+- **Select agents** according to pattern and state  
+- **Call agents** with valid JSON request  
+- **Validate responses** (schema, domain, non‑empty)  
+- **Append iterations** to timeline  
+- **Enforce constraints** (max iterations, timeouts, domains)  
+- **Expose hooks** for the AOS workspace (e.g., push new iterations via WebSocket or URL payload)
+
+---
+
+## 5. Orchestration engine API (conceptual)
+
+### 5.1 Configuration object
+
+```json
+{
+  "pattern": "sequential_chain",
+  "max_iterations": 10,
+  "stop_conditions": {
+    "max_steps": 10,
+    "domain_change_forbidden": true,
+    "adapt_contains": ["deploy fix", "policy updated"]
+  },
+  "agents": [
+    {
+      "id": "root_cause_llm",
+      "role": "root_cause",
+      "endpoint": "https://example.com/llm/root-cause",
+      "mode": "sequential"
+    },
+    {
+      "id": "mitigation_llm",
+      "role": "mitigation",
+      "endpoint": "https://example.com/llm/mitigation",
+      "mode": "sequential"
+    }
+  ]
+}
+```
+
+---
+
+### 5.2 Engine entrypoint
+
+```pseudo
+run_orchestration(config, initial_iteration) -> timeline
+```
+
+- **Inputs:**
+  - `config`: orchestration plan
+  - `initial_iteration`: AOS iteration JSON
+- **Output:**
+  - `timeline`: ordered list of iterations (including initial)
+
+---
+
+## 6. Pseudocode — core loop
+
+### 6.1 Sequential chain
+
+```pseudo
+function run_sequential_chain(config, initial_iteration):
+    timeline = [initial_iteration]
+    current = initial_iteration
+    step = 0
+
+    while step < config.max_iterations:
+        for agent in config.agents:
+            if should_stop(timeline, config.stop_conditions):
+                return timeline
+
+            response = call_agent(agent, current)
+            if not valid_iteration(response):
+                continue  // or log error
+
+            timeline.append(response)
+            current = response
+            step += 1
+
+    return timeline
+```
+
+---
+
+### 6.2 Parallel broadcast
+
+```pseudo
+function run_parallel_broadcast(config, initial_iteration):
+    timeline = [initial_iteration]
+    current = initial_iteration
+    step = 0
+
+    while step < config.max_iterations:
+        if should_stop(timeline, config.stop_conditions):
+            return timeline
+
+        responses = parallel_map(config.agents, agent -> call_agent(agent, current))
+
+        for r in responses:
+            if valid_iteration(r):
+                timeline.append(r)
+                step += 1
+
+        current = select_next_reference(timeline)  // e.g., last, best, or human-chosen
+
+    return timeline
+```
+
+---
+
+## 7. Agent call contract
+
+### 7.1 Request to agent
+
+```json
+{
+  "iteration": 7,
+  "timestamp": "2026-06-16T21:30:00Z",
+  "domain": "system_logs",
+  "sense": "...",
+  "triage": "...",
+  "explain": "...",
+  "adapt": "...",
+  "agent_context": {
+    "role": "root_cause",
+    "pattern": "sequential_chain",
+    "step": 3
+  }
+}
+```
+
+### 7.2 Expected response from agent
+
+```json
+{
+  "domain": "system_logs",
+  "sense": "Updated observations...",
+  "triage": "Refined severity...",
+  "explain": "New or refined hypotheses...",
+  "adapt": "Concrete next actions..."
+}
+```
+
+---
+
+## 8. Multi‑agent LLM behavior spec (short)
+
+- **Each agent LLM:**
+  - Reads the incoming iteration JSON  
+  - Uses its **role** to specialize its reasoning  
+  - Outputs a **new iteration JSON**  
+- **Must not:**
+  - Break JSON  
+  - Change domain unless explicitly allowed  
+  - Remove fields  
+  - Return empty or trivial content  
+
+---
+
+## 9. Machine‑readable orchestration config schema (JSON Schema)
+
+```json
+{
+  "title": "AOSMultiAgentOrchestrationConfig",
+  "type": "object",
+  "required": ["pattern", "agents"],
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "enum": [
+        "sequential_chain",
+        "parallel_broadcast",
+        "round_robin",
+        "specialized_fields"
+      ]
+    },
+    "max_iterations": { "type": "integer", "minimum": 1 },
+    "stop_conditions": {
+      "type": "object",
+      "properties": {
+        "max_steps": { "type": "integer" },
+        "domain_change_forbidden": { "type": "boolean" },
+        "adapt_contains": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint"],
+        "properties": {
+          "id": { "type": "string" },
+          "role": { "type": "string" },
+          "endpoint": { "type": "string" },
+          "mode": {
+            "type": "string",
+            "enum": ["sequential", "parallel", "broadcast"]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+If you want, next step could be: a concrete **orchestrator implementation sketch** (e.g., in TypeScript) wired directly to your existing AOS workspace (via WebSocket/HTTP), or a **governance/audit layer** on top of this engine.
