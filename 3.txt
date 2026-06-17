@@ -1,0 +1,391 @@
+Here’s a single, self‑contained page that supports **all of this at once**:
+
+- URL field mapping (`?domain=...&sense=...&triage=...&explain=...&adapt=...`)  
+- **URL‑encoded JSON ingestion** via `?payload=...` (URL‑encoded JSON)  
+- **WebSocket live ingestion** (each JSON message becomes a new iteration)  
+- Receiver mode (paste JSON → populate fields)  
+- Timeline navigation  
+- Auto‑advance on URL ingestion  
+- JSON artifact generation + simulated POST  
+
+Save as:
+
+`aos_workspace_receiver_url_ws.html`
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AOS Workspace (URL JSON + WebSocket Receiver)</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; display: flex; gap: 30px; }
+  #main { flex: 3; }
+  #timeline { flex: 1; border-left: 2px solid #ccc; padding-left: 20px; }
+
+  h1 { margin-bottom: 10px; }
+  h2 { margin-top: 25px; }
+  textarea {
+    width: 100%;
+    height: 140px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+
+  .meta input {
+    padding: 6px;
+    font-size: 14px;
+    width: 320px;
+  }
+
+  button {
+    padding: 10px 20px;
+    margin-top: 20px;
+    font-size: 16px;
+    margin-right: 10px;
+  }
+
+  #output {
+    white-space: pre;
+    background: #f5f5f5;
+    padding: 10px;
+    margin-top: 20px;
+    border: 1px solid #ccc;
+  }
+
+  #injectBox {
+    width: 100%;
+    height: 200px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+
+  .timeline-item {
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .timeline-item.active {
+    background: #e0f0ff;
+    border-color: #3399ff;
+  }
+
+  #wsStatus {
+    font-size: 13px;
+    margin-left: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="main">
+  <h1>AOS Iterative Analysis Workspace (URL JSON + WebSocket Receiver)</h1>
+
+  <div class="meta">
+    <label>Domain:
+      <input id="domain" placeholder="financial / law_enforcement / system_logs / social">
+    </label>
+  </div>
+
+  <div class="meta">
+    <label>POST Address:
+      <input id="postAddress" placeholder="/aos/iteration or any endpoint">
+    </label>
+  </div>
+
+  <div class="meta">
+    <label>WebSocket URL:
+      <input id="wsUrl" placeholder="wss://example.com/aos-stream">
+    </label>
+    <button onclick="connectWebSocket()">Connect</button>
+    <span id="wsStatus">(WebSocket: disconnected)</span>
+  </div>
+
+  <h2>Receiver Mode: Inject JSON to Populate Fields</h2>
+  <textarea id="injectBox" placeholder='Paste JSON here to populate fields...'></textarea>
+  <button onclick="loadFromJSON()">Load From JSON</button>
+
+  <h2>1. Sense</h2>
+  <textarea id="sense"></textarea>
+
+  <h2>2. Triage</h2>
+  <textarea id="triage"></textarea>
+
+  <h2>3. Explain</h2>
+  <textarea id="explain"></textarea>
+
+  <h2>4. Adapt</h2>
+  <textarea id="adapt"></textarea>
+
+  <button onclick="generateJSON()">Generate JSON Artifact</button>
+  <button onclick="simulatePOST()">Submit (Simulated POST)</button>
+  <button onclick="saveIteration()">Save + Next Iteration</button>
+  <button onclick="prevIteration()">Previous</button>
+  <button onclick="nextIteration()">Next</button>
+
+  <h2>Iterations (JSON)</h2>
+  <div id="output"></div>
+</div>
+
+<div id="timeline">
+  <h2>Timeline</h2>
+  <div id="timelineList"></div>
+</div>
+
+<script>
+  let iterations = [];
+  let currentIndex = -1;
+  let lastGeneratedJSON = null;
+  let ws = null;
+
+  // -----------------------------
+  // URL PARAMETER INGESTION
+  // Supports:
+  //   - direct fields: ?domain=...&sense=...&triage=...&explain=...&adapt=...
+  //   - URL-encoded JSON: ?payload={...}
+  // Auto-creates an iteration if anything is present.
+  // -----------------------------
+  function ingestURLParamsAndAutoAdvance() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.toString().length === 0) return;
+
+    let foundAny = false;
+
+    // 1) Direct field mapping
+    const mapping = {
+      domain: 'domain',
+      postAddress: 'postAddress',
+      sense: 'sense',
+      triage: 'triage',
+      explain: 'explain',
+      adapt: 'adapt'
+    };
+
+    for (const key in mapping) {
+      if (params.has(key)) {
+        document.getElementById(mapping[key]).value = params.get(key);
+        foundAny = true;
+      }
+    }
+
+    // 2) URL-encoded JSON payload
+    if (params.has('payload')) {
+      try {
+        const raw = params.get('payload');
+        const data = JSON.parse(raw);
+
+        if (data.domain) document.getElementById('domain').value = data.domain;
+        if (data.postAddress) document.getElementById('postAddress').value = data.postAddress;
+        if (data.sense) document.getElementById('sense').value = data.sense;
+        if (data.triage) document.getElementById('triage').value = data.triage;
+        if (data.explain) document.getElementById('explain').value = data.explain;
+        if (data.adapt) document.getElementById('adapt').value = data.adapt;
+
+        foundAny = true;
+      } catch (e) {
+        console.warn("Invalid JSON in payload parameter:", e);
+      }
+    }
+
+    if (foundAny) {
+      autoCreateIteration();
+    }
+  }
+
+  function autoCreateIteration() {
+    const record = buildRecord();
+    iterations.push(record);
+    currentIndex = iterations.length - 1;
+
+    clearFields();
+    renderTimeline();
+    renderOutput();
+  }
+
+  // -----------------------------
+  // JSON INJECTION (manual)
+  // -----------------------------
+  function loadFromJSON() {
+    try {
+      const data = JSON.parse(document.getElementById('injectBox').value);
+
+      if (data.domain) document.getElementById('domain').value = data.domain;
+      if (data.postAddress) document.getElementById('postAddress').value = data.postAddress;
+      if (data.sense) document.getElementById('sense').value = data.sense;
+      if (data.triage) document.getElementById('triage').value = data.triage;
+      if (data.explain) document.getElementById('explain').value = data.explain;
+      if (data.adapt) document.getElementById('adapt').value = data.adapt;
+
+      alert("Fields populated from JSON input.");
+    } catch (e) {
+      alert("Invalid JSON.");
+    }
+  }
+
+  // -----------------------------
+  // RECORD BUILDING
+  // -----------------------------
+  function buildRecord() {
+    return {
+      iteration: iterations.length + 1,
+      timestamp: new Date().toISOString(),
+      postAddress: document.getElementById('postAddress').value,
+      domain: document.getElementById('domain').value,
+      sense: document.getElementById('sense').value,
+      triage: document.getElementById('triage').value,
+      explain: document.getElementById('explain').value,
+      adapt: document.getElementById('adapt').value
+    };
+  }
+
+  function clearFields() {
+    document.getElementById('sense').value = "";
+    document.getElementById('triage').value = "";
+    document.getElementById('explain').value = "";
+    document.getElementById('adapt').value = "";
+  }
+
+  // -----------------------------
+  // JSON GENERATION + POST SIM
+  // -----------------------------
+  function generateJSON() {
+    lastGeneratedJSON = buildRecord();
+    document.getElementById('output').textContent =
+      JSON.stringify(lastGeneratedJSON, null, 2);
+  }
+
+  function simulatePOST() {
+    if (!lastGeneratedJSON) generateJSON();
+
+    const endpoint = lastGeneratedJSON.postAddress || "(no endpoint provided)";
+    const payload = JSON.stringify(lastGeneratedJSON, null, 2);
+
+    alert("Simulated POST to: " + endpoint + "\n\nPayload:\n" + payload);
+  }
+
+  // -----------------------------
+  // ITERATION MANAGEMENT
+  // -----------------------------
+  function saveIteration() {
+    const record = buildRecord();
+    iterations.push(record);
+    currentIndex = iterations.length - 1;
+
+    clearFields();
+    renderTimeline();
+    renderOutput();
+  }
+
+  function renderTimeline() {
+    const list = document.getElementById('timelineList');
+    list.innerHTML = "";
+
+    iterations.forEach((it, idx) => {
+      const div = document.createElement('div');
+      div.className = "timeline-item" + (idx === currentIndex ? " active" : "");
+      div.textContent = "Iteration " + it.iteration + " — " + it.timestamp;
+      div.onclick = () => loadIteration(idx);
+      list.appendChild(div);
+    });
+  }
+
+  function loadIteration(index) {
+    if (index < 0 || index >= iterations.length) return;
+
+    currentIndex = index;
+    const it = iterations[index];
+
+    document.getElementById('domain').value = it.domain;
+    document.getElementById('postAddress').value = it.postAddress;
+    document.getElementById('sense').value = it.sense;
+    document.getElementById('triage').value = it.triage;
+    document.getElementById('explain').value = it.explain;
+    document.getElementById('adapt').value = it.adapt;
+
+    renderTimeline();
+    renderOutput();
+  }
+
+  function prevIteration() {
+    if (currentIndex > 0) loadIteration(currentIndex - 1);
+  }
+
+  function nextIteration() {
+    if (currentIndex < iterations.length - 1) loadIteration(currentIndex + 1);
+  }
+
+  function renderOutput() {
+    document.getElementById('output').textContent =
+      JSON.stringify(iterations, null, 2);
+  }
+
+  // -----------------------------
+  // WEBSOCKET LIVE INGESTION
+  // -----------------------------
+  function connectWebSocket() {
+    const url = document.getElementById('wsUrl').value.trim();
+    if (!url) {
+      alert("Please enter a WebSocket URL.");
+      return;
+    }
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+
+    ws = new WebSocket(url);
+    const statusEl = document.getElementById('wsStatus');
+
+    ws.onopen = () => {
+      statusEl.textContent = "(WebSocket: connected)";
+    };
+
+    ws.onclose = () => {
+      statusEl.textContent = "(WebSocket: disconnected)";
+    };
+
+    ws.onerror = () => {
+      statusEl.textContent = "(WebSocket: error)";
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.domain) document.getElementById('domain').value = data.domain;
+        if (data.postAddress) document.getElementById('postAddress').value = data.postAddress;
+        if (data.sense) document.getElementById('sense').value = data.sense;
+        if (data.triage) document.getElementById('triage').value = data.triage;
+        if (data.explain) document.getElementById('explain').value = data.explain;
+        if (data.adapt) document.getElementById('adapt').value = data.adapt;
+
+        autoCreateIteration();
+      } catch (e) {
+        console.warn("Invalid JSON from WebSocket:", e);
+      }
+    };
+  }
+
+  // -----------------------------
+  // INITIALIZATION
+  // -----------------------------
+  ingestURLParamsAndAutoAdvance();
+</script>
+
+</body>
+</html>
+```
+
+You now have:
+
+- **URL‑encoded JSON ingestion** via `?payload={...}`  
+- **Field‑level URL ingestion** via `?sense=...&triage=...`  
+- **WebSocket live ingestion** where each JSON message becomes a new iteration  
+
+If you want, next step could be adding **download JSON/CSV** or **localStorage persistence** so this becomes a durable anomaly‑analysis notebook.
