@@ -1,0 +1,311 @@
+Baymont, here is the **full documentation suite** you asked for — written for **humans**, **LLMs**, and **machines**.  
+This is the complete “operator’s manual” for your AOS iterative workspace and anomaly‑analysis loop.
+
+I’m giving you:
+
+1. **Verbose human‑readable documentation**  
+2. **Simple summaries** (bullet points + process steps)  
+3. **LLM‑specific usage guide**  
+4. **Pseudocode specifications**  
+5. **Machine‑readable formats** (JSON schemas, CSV schemas, protocol definitions)
+
+Everything is structured so a human analyst, a developer, or an LLM can all use the system correctly and consistently.
+
+---
+
+# **1. VERBOSE HUMAN DOCUMENTATION**  
+## **AOS Iterative Workspace — User Guide (Human Edition)**
+
+### **Purpose of the Workspace**
+The AOS workspace is a structured notebook for analyzing anomalies using the four‑stage loop:
+
+1. **Sense** — What was observed?  
+2. **Triage** — How serious is it? What surfaces are affected?  
+3. **Explain** — What hypotheses explain the anomaly?  
+4. **Adapt** — What should change to prevent recurrence?
+
+Each cycle is stored as an **iteration**, forming a timeline of reasoning.
+
+### **How the Workspace Works**
+- You can type directly into the four sections.  
+- You can paste JSON into the injection box to auto‑populate fields.  
+- You can send data via URL parameters or URL‑encoded JSON.  
+- You can stream data via WebSocket.  
+- You can send an iteration to an LLM endpoint and receive a new iteration back.  
+- You can run **LLM auto‑iteration loops**, where the LLM generates multiple sequential iterations.
+
+### **What an Iteration Represents**
+Each iteration is a snapshot of your reasoning at a point in time:
+
+- What you sensed  
+- How you triaged it  
+- What explanations you considered  
+- What adaptations you proposed  
+
+Iterations accumulate into a **timeline**, allowing you to:
+
+- Navigate backward and forward  
+- Compare reasoning steps  
+- Export the entire chain  
+- Use it as a training or audit artifact  
+
+### **When to Use the Workspace**
+Use it whenever you need to:
+
+- Analyze anomalies  
+- Perform structured reasoning  
+- Collaborate with an LLM  
+- Maintain a traceable chain of thought  
+- Build a dataset of anomaly‑analysis examples  
+- Conduct investigations or postmortems  
+
+---
+
+# **2. SIMPLE SUMMARIES**
+
+## **Human Quick‑Start (Bullet Points)**
+
+- Fill in **Sense → Triage → Explain → Adapt**  
+- Click **Save + Next** to create an iteration  
+- Use the **Timeline** to navigate past iterations  
+- Paste JSON into the injection box to auto‑populate  
+- Add `?sense=...&triage=...` to the URL to auto‑create an iteration  
+- Add `?payload={...}` to ingest JSON directly  
+- Connect a WebSocket to stream iterations live  
+- Enter an LLM endpoint and click **Send to LLM**  
+- Use **Auto‑Loop** to generate multiple LLM iterations  
+
+---
+
+## **Human Quick‑Start (Process Steps)**
+
+1. Open the workspace  
+2. Enter domain + notes  
+3. Click **Save + Next**  
+4. Repeat until analysis is complete  
+5. Use timeline to review  
+6. Export JSON if needed  
+
+---
+
+# **3. LLM‑SPECIFIC USAGE GUIDE**
+
+This section tells an LLM **exactly how to behave** when interacting with the workspace.
+
+## **LLM Responsibilities**
+When receiving an iteration, the LLM should:
+
+1. **Read the four fields**: sense, triage, explain, adapt  
+2. **Produce a new iteration** that:  
+   - Advances the reasoning  
+   - Adds new insights  
+   - Refines hypotheses  
+   - Suggests next steps  
+3. **Return JSON ONLY**, with the fields:  
+   - `domain`  
+   - `sense`  
+   - `triage`  
+   - `explain`  
+   - `adapt`  
+
+## **LLM Output Format**
+The LLM must return:
+
+```json
+{
+  "domain": "system_logs",
+  "sense": "New observations...",
+  "triage": "Updated severity...",
+  "explain": "Refined hypotheses...",
+  "adapt": "Next steps..."
+}
+```
+
+No extra text. No markdown. No commentary.
+
+## **LLM Should NOT**
+- Repeat the previous iteration  
+- Produce empty fields  
+- Produce unrelated content  
+- Break JSON format  
+- Add fields not recognized by the workspace  
+
+---
+
+# **4. PSEUDOCODE SPECIFICATIONS**
+
+## **Iteration Creation**
+```pseudo
+function buildRecord():
+    record = {
+        iteration: iterations.length + 1
+        timestamp: now()
+        domain: UI.domain
+        sense: UI.sense
+        triage: UI.triage
+        explain: UI.explain
+        adapt: UI.adapt
+    }
+    return record
+```
+
+## **Auto‑Advance on URL Ingestion**
+```pseudo
+if URL has params:
+    populate fields
+    record = buildRecord()
+    iterations.append(record)
+    clear fields
+```
+
+## **WebSocket Ingestion**
+```pseudo
+on websocket message:
+    data = parse JSON(message)
+    populate fields with data
+    record = buildRecord()
+    iterations.append(record)
+    clear fields
+```
+
+## **LLM Auto‑Iteration Loop**
+```pseudo
+payload = buildRecord()
+
+for i in 1..N:
+    response = POST(llmUrl, payload)
+    data = parse JSON(response)
+    populate fields with data
+    record = buildRecord()
+    iterations.append(record)
+    payload = record
+    clear fields
+```
+
+---
+
+# **5. MACHINE‑READABLE FORMATS**
+
+## **5.1 JSON Schema for Iterations**
+
+```json
+{
+  "title": "AOSIteration",
+  "type": "object",
+  "required": ["iteration", "timestamp", "domain", "sense", "triage", "explain", "adapt"],
+  "properties": {
+    "iteration": { "type": "integer" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "domain": { "type": "string" },
+    "sense": { "type": "string" },
+    "triage": { "type": "string" },
+    "explain": { "type": "string" },
+    "adapt": { "type": "string" }
+  }
+}
+```
+
+---
+
+## **5.2 CSV Schema**
+
+Header:
+
+```
+iteration,timestamp,domain,sense,triage,explain,adapt
+```
+
+Row example:
+
+```
+3,2026-06-16T21:10:00Z,system_logs,"Observed spike","High severity","Likely cause","Add rate limiting"
+```
+
+---
+
+## **5.3 Protocol Definition for LLM Endpoint**
+
+### **Request**
+```json
+{
+  "iteration": 4,
+  "timestamp": "2026-06-16T21:11:00Z",
+  "domain": "social",
+  "sense": "...",
+  "triage": "...",
+  "explain": "...",
+  "adapt": "..."
+}
+```
+
+### **Response**
+```json
+{
+  "domain": "social",
+  "sense": "New observations...",
+  "triage": "Updated assessment...",
+  "explain": "Refined hypotheses...",
+  "adapt": "Next steps..."
+}
+```
+
+---
+
+# **6. OPTIONAL: TRAINING PROMPTS FOR LLMS**
+
+## **LLM Prompt Template**
+```
+You are participating in an iterative anomaly-analysis loop.
+
+You will receive:
+- domain
+- sense
+- triage
+- explain
+- adapt
+
+Your task:
+- Advance the reasoning
+- Improve clarity
+- Add new insights
+- Suggest next steps
+- Output ONLY valid JSON with the same fields
+
+Do not repeat previous content verbatim.
+Do not add commentary.
+```
+
+---
+
+# **7. OPTIONAL: HUMAN TRAINING CHECKLIST**
+
+### **Before starting**
+- Identify the domain  
+- Gather raw observations  
+- Understand the baseline  
+
+### **During each iteration**
+- Write what you sensed  
+- Assess severity  
+- Generate hypotheses  
+- Propose adaptations  
+
+### **After finishing**
+- Review timeline  
+- Extract lessons  
+- Update rules or playbooks  
+
+---
+
+# **If you want…**
+
+I can also generate:
+
+- A **PDF‑style manual**  
+- A **developer API reference**  
+- A **training curriculum**  
+- A **set of example iterations**  
+- A **validation suite** for LLM outputs  
+- A **governance and audit guide**  
+
+Just tell me what direction you want to expand next.
