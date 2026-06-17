@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AOS Workspace (Navigation + Collapsible Logs + Multi-Agent Orchestration)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; }
+
+  /* Top navigation bar */
+  #navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: #2c3e50;
+    color: white;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    z-index: 1000;
+  }
+  #navbar h1 {
+    font-size: 18px;
+    margin: 0;
+    padding: 0;
+  }
+  #navtabs {
+    margin-left: 40px;
+    display: flex;
+    gap: 20px;
+  }
+  .tab {
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 4px;
+  }
+  .tab.active {
+    background: #1abc9c;
+  }
+
+  /* Layout below navbar */
+  #container {
+    margin-top: 50px;
+    display: flex;
+    width: 100%;
+    height: calc(100vh - 50px);
+  }
+
+  /* Left: main workspace */
+  #main {
+    flex: 3;
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  /* Right: posted logs */
+  #logs {
+    flex: 1.5;
+    border-left: 2px solid #ccc;
+    padding: 20px;
+    overflow-y: auto;
+    background: #fafafa;
+  }
+
+  h2 { margin-top: 25px; }
+  textarea {
+    width: 100%;
+    height: 120px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+  .meta input {
+    padding: 6px;
+    font-size: 14px;
+    width: 320px;
+  }
+  button {
+    padding: 10px 20px;
+    margin-top: 20px;
+    font-size: 16px;
+    margin-right: 10px;
+  }
+
+  #output {
+    white-space: pre;
+    background: #f5f5f5;
+    padding: 10px;
+    margin-top: 20px;
+    border: 1px solid #ccc;
+  }
+
+  #injectBox {
+    width: 100%;
+    height: 150px;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    margin-top: 8px;
+  }
+
+  /* Collapsible log entries */
+  .log-entry {
+    border: 1px solid #ddd;
+    margin-bottom: 12px;
+    background: white;
+    border-radius: 4px;
+  }
+  .log-header {
+    padding: 10px;
+    background: #e8e8e8;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  .log-content {
+    padding: 10px;
+    display: none;
+  }
+
+  /* Agent panel */
+  #agentsPanel {
+    margin-top: 20px;
+    padding: 10px;
+    background: #eef7ff;
+    border: 1px solid #bcd;
+    border-radius: 4px;
+  }
+  #agentList div {
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Top Navigation Bar -->
+<div id="navbar">
+  <h1>AOS Workspace</h1>
+  <div id="navtabs">
+    <div class="tab active" onclick="switchTab('workspace')">Workspace</div>
+    <div class="tab" onclick="switchTab('agents')">Agents</div>
+    <div class="tab" onclick="switchTab('logs')">Logs</div>
+  </div>
+</div>
+
+<div id="container">
+
+  <!-- Main Workspace -->
+  <div id="main">
+    <div id="workspaceTab">
+
+      <h2>Metadata</h2>
+
+      <div class="meta">
+        <label>Domain:
+          <input id="domain" placeholder="financial / law_enforcement / system_logs / social">
+        </label>
+      </div>
+
+      <div class="meta">
+        <label>LLM Endpoint URL:
+          <input id="llmUrl" placeholder="https://example.com/llm-endpoint">
+        </label>
+        <button onclick="sendToLLM()">Send to LLM</button>
+      </div>
+
+      <div class="meta">
+        <label>Auto-Loop Iterations:
+          <input id="loopCount" type="number" value="3" min="1" style="width:80px;">
+        </label>
+        <button onclick="runLLMLoop()">Run LLM Auto-Loop</button>
+      </div>
+
+      <h2>Receiver Mode: Inject JSON</h2>
+      <textarea id="injectBox" placeholder='Paste JSON here to populate fields...'></textarea>
+      <button onclick="loadFromJSON()">Load From JSON</button>
+
+      <h2>1. Sense</h2>
+      <textarea id="sense"></textarea>
+
+      <h2>2. Triage</h2>
+      <textarea id="triage"></textarea>
+
+      <h2>3. Explain</h2>
+      <textarea id="explain"></textarea>
+
+      <h2>4. Adapt</h2>
+      <textarea id="adapt"></textarea>
+
+      <button onclick="generateJSON()">Generate JSON Artifact</button>
+      <button onclick="saveIteration()">Save + Next Iteration</button>
+
+      <h2>Raw JSON Timeline</h2>
+      <div id="output"></div>
+
+    </div>
+
+    <!-- Agents Tab -->
+    <div id="agentsTab" style="display:none;">
+      <h2>Multi-Agent Orchestration Controls</h2>
+
+      <div id="agentsPanel">
+        <h3>Registered Agents</h3>
+        <div id="agentList"></div>
+
+        <h3>Add Agent</h3>
+        <input id="agentId" placeholder="agent id">
+        <input id="agentEndpoint" placeholder="https://example.com/agent">
+        <button onclick="addAgent()">Add Agent</button>
+
+        <h3>Orchestration Pattern</h3>
+        <select id="pattern">
+          <option value="sequential_chain">Sequential Chain</option>
+          <option value="parallel_broadcast">Parallel Broadcast</option>
+          <option value="round_robin">Round Robin</option>
+        </select>
+
+        <h3>Run Orchestration</h3>
+        <button onclick="runOrchestration()">Run Multi-Agent Orchestration</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Posted Logs Panel -->
+  <div id="logs">
+    <div id="logsTab">
+      <h2>Posted Logs (Collapsible)</h2>
+      <div id="logList"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let iterations = [];
+  let agents = [];
+
+  function switchTab(tab) {
+    document.getElementById('workspaceTab').style.display = tab === 'workspace' ? 'block' : 'none';
+    document.getElementById('agentsTab').style.display = tab === 'agents' ? 'block' : 'none';
+    document.getElementById('logsTab').style.display = tab === 'logs' ? 'block' : 'none';
+
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    [...document.querySelectorAll('.tab')].find(t => t.textContent.toLowerCase() === tab).classList.add('active');
+  }
+
+  function buildRecord() {
+    return {
+      iteration: iterations.length + 1,
+      timestamp: new Date().toISOString(),
+      domain: document.getElementById('domain').value,
+      sense: document.getElementById('sense').value,
+      triage: document.getElementById('triage').value,
+      explain: document.getElementById('explain').value,
+      adapt: document.getElementById('adapt').value
+    };
+  }
+
+  function clearFields() {
+    document.getElementById('sense').value = "";
+    document.getElementById('triage').value = "";
+    document.getElementById('explain').value = "";
+    document.getElementById('adapt').value = "";
+  }
+
+  function saveIteration() {
+    const record = buildRecord();
+    iterations.push(record);
+    clearFields();
+    renderOutput();
+    renderLogs();
+  }
+
+  function generateJSON() {
+    const record = buildRecord();
+    document.getElementById('output').textContent =
+      JSON.stringify(record, null, 2);
+  }
+
+  function loadFromJSON() {
+    try {
+      const data = JSON.parse(document.getElementById('injectBox').value);
+      for (const key in data) {
+        if (document.getElementById(key)) {
+          document.getElementById(key).value = data[key];
+        }
+      }
+      alert("Fields populated from JSON input.");
+    } catch (e) {
+      alert("Invalid JSON.");
+    }
+  }
+
+  function renderOutput() {
+    document.getElementById('output').textContent =
+      JSON.stringify(iterations, null, 2);
+  }
+
+  function renderLogs() {
+    const list = document.getElementById('logList');
+    list.innerHTML = "";
+
+    iterations.forEach(it => {
+      const entry = document.createElement('div');
+      entry.className = "log-entry";
+
+      const header = document.createElement('div');
+      header.className = "log-header";
+      header.textContent = `Iteration ${it.iteration} — ${it.timestamp}`;
+      header.onclick = () => {
+        content.style.display = content.style.display === "none" ? "block" : "none";
+      };
+
+      const content = document.createElement('div');
+      content.className = "log-content";
+      content.innerHTML = `
+        <div><strong>Domain:</strong> ${it.domain}</div>
+        <div><strong>Sense:</strong> ${it.sense}</div>
+        <div><strong>Triage:</strong> ${it.triage}</div>
+        <div><strong>Explain:</strong> ${it.explain}</div>
+        <div><strong>Adapt:</strong> ${it.adapt}</div>
+      `;
+
+      entry.appendChild(header);
+      entry.appendChild(content);
+      list.appendChild(entry);
+    });
+  }
+
+  async function sendToLLM() {
+    const url = document.getElementById('llmUrl').value.trim();
+    if (!url) {
+      alert("Please enter an LLM endpoint URL.");
+      return;
+    }
+
+    const payload = buildRecord();
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+
+      for (const key in data) {
+        if (document.getElementById(key)) {
+          document.getElementById(key).value = data[key];
+        }
+      }
+
+      saveIteration();
+
+    } catch (e) {
+      alert("LLM request failed: " + e);
+    }
+  }
+
+  async function runLLMLoop() {
+    const url = document.getElementById('llmUrl').value.trim();
+    const count = parseInt(document.getElementById('loopCount').value, 10) || 1;
+
+    if (!url) {
+      alert("Please enter an LLM endpoint URL.");
+      return;
+    }
+
+    let payload = buildRecord();
+
+    for (let i = 0; i < count; i++) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        for (const key in data) {
+          if (document.getElementById(key)) {
+            document.getElementById(key).value = data[key];
+          }
+        }
+
+        saveIteration();
+        payload = iterations[iterations.length - 1];
+
+      } catch (e) {
+        alert("LLM loop failed at step " + (i + 1) + ": " + e);
+        break;
+      }
+    }
+  }
+
+  function addAgent() {
+    const id = document.getElementById('agentId').value.trim();
+    const endpoint = document.getElementById('agentEndpoint').value.trim();
+
+    if (!id || !endpoint) {
+      alert("Enter agent id and endpoint.");
+      return;
+    }
+
+    agents.push({ id, endpoint });
+    renderAgents();
+  }
+
+  function renderAgents() {
+    const list = document.getElementById('agentList');
+    list.innerHTML = "";
+
+    agents.forEach(a => {
+      const div = document.createElement('div');
+      div.textContent = `${a.id} → ${a.endpoint}`;
+      list.appendChild(div);
+    });
+  }
+
+  async function runOrchestration() {
+    const pattern = document.getElementById('pattern').value;
+
+    if (agents.length === 0) {
+      alert("No agents registered.");
+      return;
+    }
+
+    let payload = buildRecord();
+
+    if (pattern === "sequential_chain") {
+      for (const agent of agents) {
+        payload = await callAgent(agent, payload);
+        if (payload) {
+          ingestIteration(payload);
+        }
+      }
+    }
+
+    if (pattern === "parallel_broadcast") {
+      const promises = agents.map(a => callAgent(a, payload));
+      const results = await Promise.all(promises);
+      results.forEach(r => r && ingestIteration(r));
+    }
+
+    if (pattern === "round_robin") {
+      for (let i = 0; i < agents.length * 2; i++) {
+        const agent = agents[i % agents.length];
+        payload = await callAgent(agent, payload);
+        if (payload) ingestIteration(payload);
+      }
+    }
+  }
+
+  async function callAgent(agent, payload) {
+    try {
+      const response = await fetch(agent.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      return await response.json();
+    } catch (e) {
+      console.warn("Agent failed:", agent.id, e);
+      return null;
+    }
+  }
+
+  function ingestIteration(data) {
+    for (const key in data) {
+      if (document.getElementById(key)) {
+        document.getElementById(key).value = data[key];
+      }
+    }
+    saveIteration();
+  }
+</script>
+
+</body>
+</html>
